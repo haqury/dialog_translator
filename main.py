@@ -93,12 +93,25 @@ class ChatWidget(QWidget):
         widget = QWidget()
         widget.setObjectName("MessageWidget")
 
-        layout = QHBoxLayout(widget)
-        layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(8)
+        # Определяем выравнивание в зависимости от спикера
+        if message.speaker == "Speaker 1":
+            align = Qt.AlignLeft
+            main_layout = QHBoxLayout(widget)
+            main_layout.setAlignment(Qt.AlignLeft)
+        elif message.speaker == "Speaker 2":
+            align = Qt.AlignRight
+            main_layout = QHBoxLayout(widget)
+            main_layout.setAlignment(Qt.AlignRight)
+        else:  # System
+            align = Qt.AlignCenter
+            main_layout = QHBoxLayout(widget)
+            main_layout.setAlignment(Qt.AlignCenter)
+
+        main_layout.setContentsMargins(6, 6, 6, 6)
+        main_layout.setSpacing(8)
 
         if is_system:
-            # Системное сообщение
+            # Системное сообщение (центрированное)
             widget.setStyleSheet("""
                 QWidget#MessageWidget {
                     background-color: rgba(78, 205, 196, 0.1);
@@ -113,28 +126,28 @@ class ChatWidget(QWidget):
             # Заголовок
             title = QLabel(f"💡 {message.speaker}")
             title.setStyleSheet("color: #4ECDC4; font-weight: bold; font-size: 12px;")
+            title.setAlignment(Qt.AlignCenter)
 
             # Текст
             text = QLabel(message.original_text)
             text.setStyleSheet("color: #AAAAAA; font-size: 11px;")
             text.setWordWrap(True)
             text.setTextFormat(Qt.PlainText)
+            text.setAlignment(Qt.AlignCenter)
 
             content.addWidget(title)
             content.addWidget(text)
 
-            layout.addLayout(content)
+            main_layout.addLayout(content)
 
         else:
             # Обычное сообщение
             if message.speaker == "Speaker 1":
                 bubble_color = "#FF6B6B"
                 bubble_bg = "rgba(255, 107, 107, 0.1)"
-                align = Qt.AlignLeft
-            else:
+            else:  # Speaker 2
                 bubble_color = "#4ECDC4"
                 bubble_bg = "rgba(78, 205, 196, 0.1)"
-                align = Qt.AlignRight
 
             widget.setStyleSheet(f"""
                 QWidget#MessageWidget {{
@@ -158,9 +171,14 @@ class ChatWidget(QWidget):
             time_label = QLabel(message.timestamp.strftime("%H:%M:%S"))
             time_label.setStyleSheet("color: #666666; font-size: 10px;")
 
-            header.addWidget(name)
-            header.addStretch()
-            header.addWidget(time_label)
+            if align == Qt.AlignRight:
+                header.addStretch()
+                header.addWidget(name)
+                header.addWidget(time_label)
+            else:  # AlignLeft
+                header.addWidget(name)
+                header.addWidget(time_label)
+                header.addStretch()
 
             # Оригинальный текст
             original_text = QLabel(message.original_text)
@@ -193,22 +211,27 @@ class ChatWidget(QWidget):
             conf_label = QLabel(f"уверенность: {message.confidence:.0%}")
             conf_label.setStyleSheet(f"color: {confidence_color}; font-size: 10px;")
 
-            footer.addWidget(lang_label)
-            footer.addStretch()
-            footer.addWidget(conf_label)
+            if align == Qt.AlignRight:
+                footer.addStretch()
+                footer.addWidget(lang_label)
+                footer.addWidget(conf_label)
+            else:  # AlignLeft
+                footer.addWidget(lang_label)
+                footer.addWidget(conf_label)
+                footer.addStretch()
 
             content.addLayout(header)
             content.addWidget(original_text)
             content.addWidget(translated_text)
             content.addLayout(footer)
 
+            # Добавляем контент в основной layout
             if align == Qt.AlignRight:
                 # Сообщение справа
-                layout.addStretch()
-                layout.addLayout(content, 4)
+                main_layout.addLayout(content)
             else:
                 # Сообщение слева
-                layout.addLayout(content, 4)
+                main_layout.addLayout(content)
 
         return widget
 
@@ -254,7 +277,7 @@ class GoogleWebSpeechTranslator(QMainWindow):
             'auto_detect_language': True,
             'listen_timeout': 10,
             'phrase_time_limit': 10,
-            'enable_text_input': False,  # Ручной ввод отключен по умолчанию
+            'enable_text_input': False,
         }
 
         # Инициализация компонентов
@@ -334,12 +357,12 @@ class GoogleWebSpeechTranslator(QMainWindow):
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(8)
 
-        # ===== КОМПАКТНАЯ ВЕРХНЯЯ ПАНЕЛЬ =====
-        top_panel = self.create_compact_top_panel()
-        layout.addLayout(top_panel)
+        # ===== КОМПАКТНЫЙ HEADER С ВСЕМИ ЭЛЕМЕНТАМИ =====
+        header_panel = self.create_header_panel()
+        layout.addLayout(header_panel)
 
-        # ===== ВИЗУАЛИЗАЦИЯ АУДИО (компактная) =====
-        audio_panel = self.create_compact_audio_panel()
+        # ===== АУДИО ИНДИКАТОРЫ =====
+        audio_panel = self.create_audio_panel()
         layout.addLayout(audio_panel)
 
         # ===== ЧАТ =====
@@ -347,9 +370,9 @@ class GoogleWebSpeechTranslator(QMainWindow):
         self.chat_widget.setMinimumHeight(350)
         layout.addWidget(self.chat_widget)
 
-        # ===== КОМПАКТНАЯ НИЖНЯЯ ПАНЕЛЬ =====
-        bottom_panel = self.create_compact_bottom_panel()
-        layout.addLayout(bottom_panel)
+        # ===== ПАНЕЛЬ РУЧНОГО ВВОДА (если включена) =====
+        self.input_panel = self.create_input_panel()
+        layout.addLayout(self.input_panel)
 
         # Применяем стили
         self.apply_styles()
@@ -368,14 +391,14 @@ class GoogleWebSpeechTranslator(QMainWindow):
         # Добавляем инструкцию
         self.add_instruction_message()
 
-    def create_compact_top_panel(self):
-        """Создает компактную верхнюю панель"""
+    def create_header_panel(self):
+        """Создает header со всеми элементами управления"""
         layout = QHBoxLayout()
         layout.setSpacing(6)
 
-        # Заголовок (компактный)
+        # Заголовок
         title = QLabel("🎤 Переводчик")
-        title.setObjectName("CompactTitle")
+        title.setObjectName("HeaderTitle")
         title.setFixedHeight(30)
 
         # Компактные языки
@@ -390,7 +413,7 @@ class GoogleWebSpeechTranslator(QMainWindow):
 
         # Стрелка
         arrow = QLabel("⇄")
-        arrow.setObjectName("CompactArrow")
+        arrow.setObjectName("HeaderArrow")
 
         # Speaker 2 язык
         self.lang2_combo = QComboBox()
@@ -402,28 +425,79 @@ class GoogleWebSpeechTranslator(QMainWindow):
         lang_layout.addWidget(arrow)
         lang_layout.addWidget(self.lang2_combo)
 
-        # Выбор микрофона (компактный)
+        # Выбор микрофона
         self.mic_combo = QComboBox()
         if self.available_mics:
             for i, mic_name in enumerate(self.available_mics):
-                short_name = mic_name[:20] if len(mic_name) > 20 else mic_name
+                short_name = mic_name[:15] if len(mic_name) > 15 else mic_name
                 self.mic_combo.addItem(f"🎤 {short_name}", i)
-            self.mic_combo.setFixedWidth(150)
-        else:
-            self.mic_combo.addItem("🎤 Нет микрофона", -1)
-            self.mic_combo.setEnabled(False)
             self.mic_combo.setFixedWidth(120)
+        else:
+            self.mic_combo.addItem("🎤 Нет", -1)
+            self.mic_combo.setEnabled(False)
+            self.mic_combo.setFixedWidth(80)
 
+        # Основная кнопка записи
+        self.record_btn = QPushButton("🎤 НАЧАТЬ")
+        self.record_btn.clicked.connect(self.toggle_recording)
+        self.record_btn.setEnabled(self.recognizer is not None and self.microphone is not None)
+        self.record_btn.setFixedHeight(30)
+        self.record_btn.setFixedWidth(100)
+
+        # Кнопки управления (компактные)
+        button_style = """
+            QPushButton {
+                background-color: rgba(40, 45, 55, 180);
+                color: white;
+                border: 1px solid rgba(60, 65, 75, 180);
+                border-radius: 4px;
+                padding: 4px 6px;
+                font-size: 11px;
+                min-width: 40px;
+            }
+            QPushButton:hover {
+                background-color: rgba(50, 55, 65, 180);
+            }
+            QPushButton:pressed {
+                background-color: rgba(30, 35, 45, 180);
+            }
+        """
+
+        self.clear_btn = QPushButton("🗑️")
+        self.clear_btn.clicked.connect(self.clear_dialog)
+        self.clear_btn.setStyleSheet(button_style)
+        self.clear_btn.setFixedSize(32, 30)
+        self.clear_btn.setToolTip("Очистить чат")
+
+        self.export_btn = QPushButton("💾")
+        self.export_btn.clicked.connect(self.export_dialog)
+        self.export_btn.setStyleSheet(button_style)
+        self.export_btn.setFixedSize(32, 30)
+        self.export_btn.setToolTip("Экспорт чата")
+
+        self.settings_btn = QPushButton("⚙️")
+        self.settings_btn.clicked.connect(self.show_settings)
+        self.settings_btn.setStyleSheet(button_style)
+        self.settings_btn.setFixedSize(32, 30)
+        self.settings_btn.setToolTip("Настройки")
+
+        # Добавляем все элементы в header
         layout.addWidget(title)
-        layout.addStretch()
+        layout.addSpacing(10)
         layout.addLayout(lang_layout)
         layout.addSpacing(10)
         layout.addWidget(self.mic_combo)
+        layout.addStretch()
+        layout.addWidget(self.clear_btn)
+        layout.addWidget(self.export_btn)
+        layout.addWidget(self.settings_btn)
+        layout.addSpacing(10)
+        layout.addWidget(self.record_btn)
 
         return layout
 
-    def create_compact_audio_panel(self):
-        """Создает компактную панель аудио"""
+    def create_audio_panel(self):
+        """Создает панель аудио индикаторов"""
         layout = QVBoxLayout()
         layout.setSpacing(4)
 
@@ -437,7 +511,7 @@ class GoogleWebSpeechTranslator(QMainWindow):
         # Компактная строка статусов
         status_layout = QHBoxLayout()
 
-        self.listening_status = QLabel("🔴 Не слушает")
+        self.listening_status = QLabel("🔴 Выкл.")
         self.listening_status.setStyleSheet("font-size: 11px;")
 
         self.recognition_status = QLabel("Готов")
@@ -457,71 +531,24 @@ class GoogleWebSpeechTranslator(QMainWindow):
 
         return layout
 
-    def create_compact_bottom_panel(self):
-        """Создает компактную нижнюю панель"""
+    def create_input_panel(self):
+        """Создает панель ручного ввода (скрыта по умолчанию)"""
         layout = QHBoxLayout()
         layout.setSpacing(6)
 
-        # Основная кнопка записи
-        self.record_btn = QPushButton("🎤 НАЧАТЬ ПРОСЛУШИВАНИЕ")
-        self.record_btn.clicked.connect(self.toggle_recording)
-        self.record_btn.setEnabled(self.recognizer is not None and self.microphone is not None)
-        self.record_btn.setFixedHeight(32)
-
-        # Компактные кнопки управления
-        button_style = """
-            QPushButton {
-                background-color: rgba(40, 45, 55, 180);
-                color: white;
-                border: 1px solid rgba(60, 65, 75, 180);
-                border-radius: 4px;
-                padding: 4px 8px;
-                font-size: 11px;
-                min-width: 60px;
-            }
-            QPushButton:hover {
-                background-color: rgba(50, 55, 65, 180);
-            }
-            QPushButton:pressed {
-                background-color: rgba(30, 35, 45, 180);
-            }
-        """
-
-        self.clear_btn = QPushButton("🗑️ Очистить")
-        self.clear_btn.clicked.connect(self.clear_dialog)
-        self.clear_btn.setStyleSheet(button_style)
-        self.clear_btn.setFixedHeight(32)
-
-        self.export_btn = QPushButton("💾 Экспорт")
-        self.export_btn.clicked.connect(self.export_dialog)
-        self.export_btn.setStyleSheet(button_style)
-        self.export_btn.setFixedHeight(32)
-
-        self.settings_btn = QPushButton("⚙️ Настройки")
-        self.settings_btn.clicked.connect(self.show_settings)
-        self.settings_btn.setStyleSheet(button_style)
-        self.settings_btn.setFixedHeight(32)
-
-        # Ручной ввод (скрыт по умолчанию)
         self.manual_input = QLineEdit()
-        self.manual_input.setPlaceholderText("Ручной ввод...")
+        self.manual_input.setPlaceholderText("Ручной ввод текста...")
         self.manual_input.returnPressed.connect(self.process_manual_input)
         self.manual_input.setVisible(self.config['enable_text_input'])
 
         self.send_btn = QPushButton("📤")
         self.send_btn.clicked.connect(self.process_manual_input)
-        self.send_btn.setFixedWidth(32)
-        self.send_btn.setFixedHeight(32)
+        self.send_btn.setFixedWidth(40)
+        self.send_btn.setFixedHeight(30)
         self.send_btn.setVisible(self.config['enable_text_input'])
 
-        layout.addWidget(self.record_btn, 3)
-        layout.addWidget(self.clear_btn)
-        layout.addWidget(self.export_btn)
-        layout.addWidget(self.settings_btn)
-
-        if self.config['enable_text_input']:
-            layout.addWidget(self.manual_input)
-            layout.addWidget(self.send_btn)
+        layout.addWidget(self.manual_input)
+        layout.addWidget(self.send_btn)
 
         return layout
 
@@ -543,14 +570,14 @@ class GoogleWebSpeechTranslator(QMainWindow):
             color: #FFFFFF;
         }
         
-        QLabel#CompactTitle {
+        QLabel#HeaderTitle {
             color: #FFFFFF;
             font-size: 14px;
             font-weight: bold;
             padding: 0px 8px;
         }
         
-        QLabel#CompactArrow {
+        QLabel#HeaderArrow {
             color: #4ECDC4;
             font-size: 16px;
             font-weight: bold;
@@ -661,10 +688,10 @@ class GoogleWebSpeechTranslator(QMainWindow):
 
         if self.is_recording:
             # Начинаем запись
-            self.record_btn.setText("⏹️ ОСТАНОВИТЬ")
+            self.record_btn.setText("⏹️ СТОП")
             self.record_btn.setStyleSheet("background-color: #D32F2F;")
             self.recognition_status.setText("🎤 Слушаю...")
-            self.listening_status.setText("🟢 Слушает")
+            self.listening_status.setText("🟢 Вкл.")
             self.listening_status.setStyleSheet("color: #4ECDC4; font-weight: bold; font-size: 11px;")
             self.recording_time.setText("00:00")
 
@@ -680,10 +707,10 @@ class GoogleWebSpeechTranslator(QMainWindow):
 
         else:
             # Останавливаем запись
-            self.record_btn.setText("🎤 НАЧАТЬ ПРОСЛУШИВАНИЕ")
+            self.record_btn.setText("🎤 НАЧАТЬ")
             self.record_btn.setStyleSheet("")
             self.recognition_status.setText("Готов")
-            self.listening_status.setText("🔴 Не слушает")
+            self.listening_status.setText("🔴 Выкл.")
             self.listening_status.setStyleSheet("color: #888888; font-size: 11px;")
 
             # Устанавливаем флаг остановки
@@ -972,7 +999,7 @@ class GoogleWebSpeechTranslator(QMainWindow):
         instruction = (
             "🎤 ПЕРЕВОДЧИК С GOOGLE WEB SPEECH API\n\n"
             "1. Выберите языки и микрофон\n"
-            "2. Нажмите 'НАЧАТЬ ПРОСЛУШИВАНИЕ'\n"
+            "2. Нажмите 'НАЧАТЬ' для начала записи\n"
             "3. Говорите в микрофон\n"
             "4. Программа автоматически определит язык\n"
             "5. Перевод появится в чате\n\n"
@@ -1128,7 +1155,7 @@ class GoogleWebSpeechTranslator(QMainWindow):
                 if int(time.time() * 2) % 2 == 0:
                     self.listening_status.setText("🟢 СЛУШАЕТ")
                 else:
-                    self.listening_status.setText("🟢 слушает")
+                    self.listening_status.setText("🟢 Вкл.")
         else:
             self.volume_meter.setValue(0)
 
@@ -1352,8 +1379,8 @@ if __name__ == "__main__":
 
     print("\n🚀 Возможности:")
     print("  • Распознавание речи через бесплатный Google Web Speech API")
-    print("  • Компактный интерфейс")
-    print("  • Сообщения располагаются с разных сторон как в чате")
+    print("  • Компактный header со всеми элементами управления")
+    print("  • Сообщения Speaker 1 - слева, Speaker 2 - справа")
     print("  • Настройка количества сообщений (10-200)")
     print("  • Ручной ввод можно включить в настройках")
 
