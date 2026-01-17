@@ -380,7 +380,7 @@ class GoogleWebSpeechTranslator(QMainWindow):
         # Устанавливаем прозрачность
         self.setWindowOpacity(self.config['opacity'])
 
-        # Устанавливаем размер
+        # Устанавливаем размер по умолчанию
         self.resize(800, 700)
 
         # Таймер для обновления UI
@@ -396,10 +396,59 @@ class GoogleWebSpeechTranslator(QMainWindow):
         layout = QHBoxLayout()
         layout.setSpacing(6)
 
+        # КНОПКА ЗАКРЫТИЯ
+        self.close_btn = QPushButton("✕")
+        self.close_btn.clicked.connect(self.close)
+        self.close_btn.setFixedSize(28, 28)
+        self.close_btn.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(200, 60, 60, 180);
+                color: white;
+                border: none;
+                border-radius: 14px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: rgba(220, 80, 80, 220);
+            }
+            QPushButton:pressed {
+                background-color: rgba(180, 40, 40, 220);
+            }
+        """)
+        layout.addWidget(self.close_btn)
+
+        # Кнопка разворачивания на весь экран
+        self.fullscreen_btn = QPushButton("⛶")
+        self.fullscreen_btn.clicked.connect(self.toggle_fullscreen)
+        self.fullscreen_btn.setFixedSize(28, 28)
+        self.fullscreen_btn.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(60, 120, 200, 180);
+                color: white;
+                border: none;
+                border-radius: 14px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: rgba(80, 140, 220, 220);
+            }
+            QPushButton:pressed {
+                background-color: rgba(40, 100, 180, 220);
+            }
+        """)
+        layout.addWidget(self.fullscreen_btn)
+
+        layout.addSpacing(10)
+
         # Заголовок
         title = QLabel("🎤 Переводчик")
         title.setObjectName("HeaderTitle")
         title.setFixedHeight(30)
+        layout.addWidget(title)
+
+        layout.addSpacing(10)
 
         # Компактные языки
         lang_layout = QHBoxLayout()
@@ -424,6 +473,9 @@ class GoogleWebSpeechTranslator(QMainWindow):
         lang_layout.addWidget(self.lang1_combo)
         lang_layout.addWidget(arrow)
         lang_layout.addWidget(self.lang2_combo)
+        layout.addLayout(lang_layout)
+
+        layout.addSpacing(10)
 
         # Выбор микрофона
         self.mic_combo = QComboBox()
@@ -436,6 +488,10 @@ class GoogleWebSpeechTranslator(QMainWindow):
             self.mic_combo.addItem("🎤 Нет", -1)
             self.mic_combo.setEnabled(False)
             self.mic_combo.setFixedWidth(80)
+
+        layout.addWidget(self.mic_combo)
+
+        layout.addStretch()
 
         # Основная кнопка записи
         self.record_btn = QPushButton("🎤 НАЧАТЬ")
@@ -481,13 +537,7 @@ class GoogleWebSpeechTranslator(QMainWindow):
         self.settings_btn.setFixedSize(32, 30)
         self.settings_btn.setToolTip("Настройки")
 
-        # Добавляем все элементы в header
-        layout.addWidget(title)
-        layout.addSpacing(10)
-        layout.addLayout(lang_layout)
-        layout.addSpacing(10)
-        layout.addWidget(self.mic_combo)
-        layout.addStretch()
+        # Добавляем кнопки управления
         layout.addWidget(self.clear_btn)
         layout.addWidget(self.export_btn)
         layout.addWidget(self.settings_btn)
@@ -675,6 +725,27 @@ class GoogleWebSpeechTranslator(QMainWindow):
         """
 
         self.setStyleSheet(style)
+
+    def toggle_fullscreen(self):
+        """Переключает режим полного экрана"""
+        if self.isFullScreen():
+            self.showNormal()
+            self.fullscreen_btn.setText("⛶")
+            # Возвращаем скругленные углы
+            self.setStyleSheet(self.styleSheet() + """
+                QMainWindow {
+                    border-radius: 12px;
+                }
+            """)
+        else:
+            self.showFullScreen()
+            self.fullscreen_btn.setText("⛶")
+            # Убираем скругленные углы в полноэкранном режиме
+            self.setStyleSheet(self.styleSheet() + """
+                QMainWindow {
+                    border-radius: 0px;
+                }
+            """)
 
     def toggle_recording(self):
         """Включение/выключение записи"""
@@ -1003,7 +1074,9 @@ class GoogleWebSpeechTranslator(QMainWindow):
             "3. Говорите в микрофон\n"
             "4. Программа автоматически определит язык\n"
             "5. Перевод появится в чате\n\n"
-            "⚙️ Ручной ввод можно включить в настройках"
+            "⚙️ Ручной ввод можно включить в настройках\n"
+            "⛶ Нажмите для переключения полного экрана\n"
+            "✕ Закрыть приложение"
         )
 
         self.add_system_message(instruction)
@@ -1356,13 +1429,11 @@ def main():
     # Создаем и показываем окно
     translator = GoogleWebSpeechTranslator()
 
-    # Позиционируем окно
-    screen = app.primaryScreen().availableGeometry()
-    x = screen.width() - translator.width() - 20
-    y = 20
-    translator.move(x, y)
+    # Открываем во весь экран
+    translator.showFullScreen()
 
-    translator.show()
+    # Обновляем текст кнопки
+    translator.fullscreen_btn.setText("⛶")
 
     sys.exit(app.exec_())
 
@@ -1383,6 +1454,8 @@ if __name__ == "__main__":
     print("  • Сообщения Speaker 1 - слева, Speaker 2 - справа")
     print("  • Настройка количества сообщений (10-200)")
     print("  • Ручной ввод можно включить в настройках")
+    print("  • Кнопка закрытия приложения (красная кнопка ✕)")
+    print("  • Полноэкранный режим (кнопка ⛶)")
 
     print("\n⚡ Преимущества:")
     print("  • НЕ ТРЕБУЕТ API ключа")
