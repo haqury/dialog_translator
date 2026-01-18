@@ -1274,86 +1274,249 @@ class GoogleWebSpeechTranslator(QMainWindow):
             self.message_queue.put(('info', "Чат очищен"))
 
     def show_settings(self):
-        """Показывает настройки"""
+        """Показывает настройки в стиле основного интерфейса"""
         dialog = QDialog(self)
         dialog.setWindowTitle("Настройки")
-        dialog.setFixedSize(350, 400)
+        dialog.setFixedSize(380, 450)  # Уменьшил размер для компактности
+        dialog.setWindowFlags(dialog.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+
+        # Применяем стиль основного окна
+        dialog.setStyleSheet("""
+            QDialog {
+                background-color: rgba(25, 30, 40, 230);
+                border-radius: 12px;
+                border: 2px solid rgba(40, 45, 55, 200);
+            }
+            QLabel {
+                color: #FFFFFF;
+                font-size: 12px;
+            }
+            QPushButton {
+                background-color: rgba(40, 45, 55, 200);
+                color: white;
+                border: 1px solid rgba(60, 65, 75, 200);
+                border-radius: 6px;
+                padding: 6px 12px;
+                font-weight: bold;
+                font-size: 12px;
+                min-width: 70px;
+            }
+            QPushButton:hover {
+                background-color: rgba(50, 55, 65, 200);
+            }
+            QPushButton:pressed {
+                background-color: rgba(30, 35, 45, 200);
+            }
+            QSlider::groove:horizontal {
+                background: rgba(40, 45, 55, 180);
+                height: 4px;
+                border-radius: 2px;
+            }
+            QSlider::handle:horizontal {
+                background: #4ECDC4;
+                width: 16px;
+                height: 16px;
+                margin: -6px 0;
+                border-radius: 8px;
+            }
+            QSpinBox, QDoubleSpinBox {
+                background-color: rgba(40, 45, 55, 180);
+                color: white;
+                border: 1px solid rgba(60, 65, 75, 180);
+                border-radius: 4px;
+                padding: 3px;
+                font-size: 11px;
+                min-width: 60px;
+            }
+            QCheckBox {
+                color: white;
+                font-size: 12px;
+                spacing: 6px;
+            }
+            QCheckBox::indicator {
+                width: 16px;
+                height: 16px;
+                border: 2px solid #4ECDC4;
+                border-radius: 3px;
+                background-color: rgba(40, 45, 55, 180);
+            }
+            QCheckBox::indicator:checked {
+                background-color: #4ECDC4;
+            }
+            QGroupBox {
+                color: #4ECDC4;
+                font-weight: bold;
+                border: 1px solid rgba(60, 65, 75, 100);
+                border-radius: 6px;
+                margin-top: 10px;
+                padding-top: 12px;
+                font-size: 13px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 6px 0 6px;
+            }
+        """)
 
         layout = QVBoxLayout(dialog)
+        layout.setSpacing(10)
+        layout.setContentsMargins(15, 15, 15, 15)
 
-        # Прозрачность
-        opacity_layout = QHBoxLayout()
-        opacity_layout.addWidget(QLabel("Прозрачность:"))
+        # Заголовок
+        title = QLabel("⚙️ Настройки")
+        title.setStyleSheet("""
+            font-size: 14px;
+            font-weight: bold;
+            color: #4ECDC4;
+            padding-bottom: 8px;
+            border-bottom: 1px solid rgba(60, 65, 75, 100);
+        """)
+        title.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title)
+
+        # ==== Группа внешнего вида ====
+        appearance_group = QGroupBox("Внешний вид")
+
+        appearance_layout = QGridLayout(appearance_group)
+        appearance_layout.setVerticalSpacing(8)
+        appearance_layout.setHorizontalSpacing(10)
+
+        # Прозрачность окна
+        appearance_layout.addWidget(QLabel("Прозрачность окна:"), 0, 0)
+
         opacity_slider = QSlider(Qt.Horizontal)
         opacity_slider.setRange(30, 100)
         opacity_slider.setValue(int(self.config['opacity'] * 100))
-        opacity_slider.valueChanged.connect(
-            lambda v: self.change_opacity(v))
-        opacity_layout.addWidget(opacity_slider)
-        layout.addLayout(opacity_layout)
 
-        # Максимальное количество сообщений
-        messages_layout = QHBoxLayout()
-        messages_layout.addWidget(QLabel("Сообщений в чате:"))
+        self.opacity_value_label = QLabel(f"{int(self.config['opacity'] * 100)}%")
+        self.opacity_value_label.setStyleSheet("color: #4ECDC4; font-weight: bold; min-width: 40px;")
+
+        appearance_layout.addWidget(opacity_slider, 0, 1)
+        appearance_layout.addWidget(self.opacity_value_label, 0, 2)
+
+        opacity_slider.valueChanged.connect(lambda v: self.opacity_value_label.setText(f"{v}%"))
+        opacity_slider.valueChanged.connect(lambda v: self.change_opacity(v))
+
+        # Сообщений в чате
+        appearance_layout.addWidget(QLabel("Сообщений в чате:"), 1, 0)
+
         messages_spin = QSpinBox()
         messages_spin.setRange(10, 200)
         messages_spin.setValue(self.config['max_messages'])
-        messages_spin.valueChanged.connect(self.change_max_messages)
-        messages_layout.addWidget(messages_spin)
-        layout.addLayout(messages_layout)
+        messages_spin.setFixedWidth(70)
 
-        # Ручной ввод
-        text_input_layout = QHBoxLayout()
-        text_input_layout.addWidget(QLabel("Ручной ввод текста:"))
-        self.text_input_checkbox = QCheckBox("Включить")
-        self.text_input_checkbox.setChecked(self.config['enable_text_input'])
-        self.text_input_checkbox.stateChanged.connect(self.toggle_text_input)
-        text_input_layout.addWidget(self.text_input_checkbox)
-        layout.addLayout(text_input_layout)
+        appearance_layout.addWidget(messages_spin, 1, 1, 1, 2)
+
+        messages_spin.valueChanged.connect(self.change_max_messages)
+
+        layout.addWidget(appearance_group)
+
+        # ==== Группа распознавания речи ====
+        recognition_group = QGroupBox("Распознавание речи")
+
+        recognition_layout = QGridLayout(recognition_group)
+        recognition_layout.setVerticalSpacing(8)
+        recognition_layout.setHorizontalSpacing(10)
 
         # Автоопределение языка
-        auto_layout = QHBoxLayout()
-        auto_layout.addWidget(QLabel("Автоопределение языка:"))
-        self.auto_detect_checkbox = QCheckBox("Включено")
+        self.auto_detect_checkbox = QCheckBox("Автоопределение языка")
         self.auto_detect_checkbox.setChecked(self.config['auto_detect_language'])
         self.auto_detect_checkbox.stateChanged.connect(self.toggle_auto_detect)
-        auto_layout.addWidget(self.auto_detect_checkbox)
-        layout.addLayout(auto_layout)
+
+        recognition_layout.addWidget(self.auto_detect_checkbox, 0, 0, 1, 3)
 
         # Порог энергии
-        energy_layout = QHBoxLayout()
-        energy_layout.addWidget(QLabel("Порог энергии:"))
+        recognition_layout.addWidget(QLabel("Порог энергии:"), 1, 0)
+
         energy_slider = QSlider(Qt.Horizontal)
         energy_slider.setRange(100, 500)
         energy_slider.setValue(self.config['energy_threshold'])
-        energy_slider.valueChanged.connect(
-            lambda v: self.update_energy_threshold(v))
-        energy_layout.addWidget(energy_slider)
-        layout.addLayout(energy_layout)
+
+        self.energy_value_label = QLabel(f"{self.config['energy_threshold']}")
+        self.energy_value_label.setStyleSheet("color: #4ECDC4; font-weight: bold; min-width: 40px;")
+
+        recognition_layout.addWidget(energy_slider, 1, 1)
+        recognition_layout.addWidget(self.energy_value_label, 1, 2)
+
+        energy_slider.valueChanged.connect(lambda v: self.energy_value_label.setText(f"{v}"))
+        energy_slider.valueChanged.connect(lambda v: self.update_energy_threshold(v))
 
         # Порог паузы
-        pause_layout = QHBoxLayout()
-        pause_layout.addWidget(QLabel("Порог паузы (сек):"))
+        recognition_layout.addWidget(QLabel("Порог паузы:"), 2, 0)
+
         pause_spin = QDoubleSpinBox()
         pause_spin.setRange(0.5, 2.0)
         pause_spin.setSingleStep(0.1)
+        pause_spin.setDecimals(2)
         pause_spin.setValue(self.config['pause_threshold'])
-        pause_spin.valueChanged.connect(
-            lambda v: self.update_pause_threshold(v))
-        pause_layout.addWidget(pause_spin)
-        layout.addLayout(pause_layout)
+        pause_spin.setFixedWidth(70)
 
-        # Разделитель
-        line = QFrame()
-        line.setFrameShape(QFrame.HLine)
-        line.setFrameShadow(QFrame.Sunken)
-        layout.addWidget(line)
+        recognition_layout.addWidget(pause_spin, 2, 1, 1, 2)
+
+        pause_spin.valueChanged.connect(lambda v: self.update_pause_threshold(v))
+
+        layout.addWidget(recognition_group)
+
+        # ==== Группа дополнительных функций ====
+        features_group = QGroupBox("Дополнительные функции")
+
+        features_layout = QVBoxLayout(features_group)
+        features_layout.setSpacing(8)
+
+        # Ручной ввод текста
+        self.text_input_checkbox = QCheckBox("Ручной ввод текста")
+        self.text_input_checkbox.setChecked(self.config['enable_text_input'])
+        self.text_input_checkbox.stateChanged.connect(self.toggle_text_input)
+
+        features_layout.addWidget(self.text_input_checkbox)
+
+        # Информация о ручном вводе
+        info_label = QLabel("Включает поле ввода внизу окна")
+        info_label.setStyleSheet("color: #888888; font-size: 10px; padding-left: 22px; font-style: italic;")
+        features_layout.addWidget(info_label)
+
+        layout.addWidget(features_group)
+
+        layout.addStretch()
 
         # Кнопки
-        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        button_box.accepted.connect(dialog.accept)
-        button_box.rejected.connect(dialog.reject)
-        layout.addWidget(button_box)
+        button_widget = QWidget()
+        button_layout = QHBoxLayout(button_widget)
+        button_layout.setContentsMargins(0, 10, 0, 0)
+        button_layout.setSpacing(15)
+
+        ok_btn = QPushButton("✅ Применить")
+        ok_btn.clicked.connect(dialog.accept)
+        ok_btn.setFixedWidth(100)
+        ok_btn.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(78, 205, 196, 180);
+                border: 1px solid rgba(78, 205, 196, 200);
+            }
+            QPushButton:hover {
+                background-color: rgba(78, 205, 196, 220);
+            }
+        """)
+
+        cancel_btn = QPushButton("❌ Отмена")
+        cancel_btn.clicked.connect(dialog.reject)
+        cancel_btn.setFixedWidth(100)
+        cancel_btn.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(255, 107, 107, 180);
+                border: 1px solid rgba(255, 107, 107, 200);
+            }
+            QPushButton:hover {
+                background-color: rgba(255, 107, 107, 220);
+            }
+        """)
+
+        button_layout.addStretch()
+        button_layout.addWidget(cancel_btn)
+        button_layout.addWidget(ok_btn)
+
+        layout.addWidget(button_widget)
 
         dialog.exec_()
 
