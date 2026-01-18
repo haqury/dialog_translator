@@ -20,9 +20,9 @@ from pathlib import Path
 
 # PyQt5 для GUI
 from PyQt5.QtWidgets import *
-from PyQt5.QtCore import *
+from PyQt5.QtCore import QTimer, Qt, QEvent, QUrl, QMetaObject, Q_ARG, pyqtSignal
 from PyQt5.QtGui import *
-from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
+from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent, QAudioDeviceInfo, QAudio
 from PyQt5.QtMultimediaWidgets import QVideoWidget
 
 # Для распознавания речи
@@ -44,8 +44,18 @@ from app.config import DEFAULT_CONFIG, LANGUAGE_MAP, TTS_VOICES, load_config, sa
 # ChatWidget теперь импортируется из app.widgets.chat_widget
 
 class GoogleWebSpeechTranslator(QMainWindow):
+    # Сигнал для передачи списка голосов из потока в главный поток
+    voices_loaded = pyqtSignal(list)
+    
     def __init__(self):
         super().__init__()
+        
+        # Подключаем сигнал
+        def on_voices_loaded(voices):
+            print(f"🔊 DEBUG: Сигнал voices_loaded получен с {len(voices) if voices else 0} голосами")
+            self.show_voice_selection_dialog(voices)
+        
+        self.voices_loaded.connect(on_voices_loaded)
 
         # Загружаем настройки из файла или используем по умолчанию
         self.config = load_config()
@@ -172,50 +182,6 @@ class GoogleWebSpeechTranslator(QMainWindow):
         layout = QHBoxLayout()
         layout.setSpacing(6)
 
-        # КНОПКА ЗАКРЫТИЯ
-        self.close_btn = QPushButton("✕")
-        self.close_btn.clicked.connect(self.close)
-        self.close_btn.setFixedSize(28, 28)
-        self.close_btn.setStyleSheet("""
-            QPushButton {
-                background-color: rgba(200, 60, 60, 180);
-                color: white;
-                border: none;
-                border-radius: 14px;
-                font-weight: bold;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: rgba(220, 80, 80, 220);
-            }
-            QPushButton:pressed {
-                background-color: rgba(180, 40, 40, 220);
-            }
-        """)
-        layout.addWidget(self.close_btn)
-
-        # Кнопка разворачивания на весь экран
-        self.fullscreen_btn = QPushButton("⛶")
-        self.fullscreen_btn.clicked.connect(self.toggle_fullscreen)
-        self.fullscreen_btn.setFixedSize(28, 28)
-        self.fullscreen_btn.setStyleSheet("""
-            QPushButton {
-                background-color: rgba(60, 120, 200, 180);
-                color: white;
-                border: none;
-                border-radius: 14px;
-                font-weight: bold;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: rgba(80, 140, 220, 220);
-            }
-            QPushButton:pressed {
-                background-color: rgba(40, 100, 180, 220);
-            }
-        """)
-        layout.addWidget(self.fullscreen_btn)
-
         layout.addSpacing(10)
 
         # Заголовок
@@ -260,12 +226,76 @@ class GoogleWebSpeechTranslator(QMainWindow):
                 short_name = mic_name[:15] if len(mic_name) > 15 else mic_name
                 self.mic_combo.addItem(f"🎤 {short_name}", i)
             self.mic_combo.setFixedWidth(120)
+            # Исправляем шрифты для ComboBox
+            self.mic_combo.setStyleSheet("""
+                QComboBox {
+                    font-family: "Segoe UI", Arial, sans-serif;
+                    font-size: 11px;
+                }
+                QComboBox QAbstractItemView {
+                    font-family: "Segoe UI", Arial, sans-serif;
+                    font-size: 11px;
+                }
+            """)
         else:
             self.mic_combo.addItem("🎤 Нет", -1)
             self.mic_combo.setEnabled(False)
             self.mic_combo.setFixedWidth(80)
 
         layout.addWidget(self.mic_combo)
+        
+        # Выбор устройства воспроизведения
+        self.output_combo = QComboBox()
+        try:
+            # В PyQt5 используем QAudio.AudioOutput для получения устройств вывода
+            all_devices = QAudioDeviceInfo.availableDevices(QAudio.AudioOutput)
+            if all_devices:
+                self.output_combo.addItem("🔊 По умолчанию", "")
+                for device in all_devices:
+                    device_name = device.deviceName()
+                    short_name = device_name[:15] if len(device_name) > 15 else device_name
+                    self.output_combo.addItem(f"🔊 {short_name}", device_name)
+                # Восстанавливаем сохраненное устройство
+                saved_output = self.config.get('selected_output_device', '')
+                if saved_output:
+                    index = self.output_combo.findData(saved_output)
+                    if index >= 0:
+                        self.output_combo.setCurrentIndex(index)
+                self.output_combo.setFixedWidth(120)
+                # Исправляем шрифты для ComboBox
+                self.output_combo.setStyleSheet("""
+                    QComboBox {
+                        font-family: "Segoe UI", Arial, sans-serif;
+                        font-size: 11px;
+                    }
+                    QComboBox QAbstractItemView {
+                        font-family: "Segoe UI", Arial, sans-serif;
+                        font-size: 11px;
+                    }
+                """)
+                self.output_combo.currentIndexChanged.connect(self.on_output_device_changed)
+            else:
+                self.output_combo.addItem("🔊 Нет", "")
+                self.output_combo.setEnabled(False)
+                self.output_combo.setFixedWidth(80)
+        except (AttributeError, ImportError) as e:
+            # Если не удалось получить устройства, просто показываем "По умолчанию"
+            print(f"⚠️ Не удалось получить список устройств вывода: {e}")
+            self.output_combo.addItem("🔊 По умолчанию", "")
+            self.output_combo.setFixedWidth(120)
+            self.output_combo.setStyleSheet("""
+                QComboBox {
+                    font-family: "Segoe UI", Arial, sans-serif;
+                    font-size: 11px;
+                }
+                QComboBox QAbstractItemView {
+                    font-family: "Segoe UI", Arial, sans-serif;
+                    font-size: 11px;
+                }
+            """)
+            self.output_combo.currentIndexChanged.connect(self.on_output_device_changed)
+        
+        layout.addWidget(self.output_combo)
 
         layout.addStretch()
 
@@ -319,6 +349,52 @@ class GoogleWebSpeechTranslator(QMainWindow):
         layout.addWidget(self.settings_btn)
         layout.addSpacing(10)
         layout.addWidget(self.record_btn)
+        
+        layout.addStretch()
+        
+        # Кнопка разворачивания на весь экран (справа)
+        self.fullscreen_btn = QPushButton("⛶")
+        self.fullscreen_btn.clicked.connect(self.toggle_fullscreen)
+        self.fullscreen_btn.setFixedSize(28, 28)
+        self.fullscreen_btn.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(60, 120, 200, 180);
+                color: white;
+                border: none;
+                border-radius: 14px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: rgba(80, 140, 220, 220);
+            }
+            QPushButton:pressed {
+                background-color: rgba(40, 100, 180, 220);
+            }
+        """)
+        layout.addWidget(self.fullscreen_btn)
+        
+        # КНОПКА ЗАКРЫТИЯ (справа)
+        self.close_btn = QPushButton("✕")
+        self.close_btn.clicked.connect(self.close)
+        self.close_btn.setFixedSize(28, 28)
+        self.close_btn.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(200, 60, 60, 180);
+                color: white;
+                border: none;
+                border-radius: 14px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: rgba(220, 80, 80, 220);
+            }
+            QPushButton:pressed {
+                background-color: rgba(180, 40, 40, 220);
+            }
+        """)
+        layout.addWidget(self.close_btn)
 
         return layout
 
@@ -741,6 +817,14 @@ class GoogleWebSpeechTranslator(QMainWindow):
         except Exception as e:
             print(f"❌ Ошибка воспроизведения: {e}")
 
+    def on_output_device_changed(self, index):
+        """Обрабатывает изменение устройства воспроизведения"""
+        device_name = self.output_combo.itemData(index)
+        if device_name is not None:
+            self.config['selected_output_device'] = device_name
+            save_config(self.config)
+            print(f"✅ Устройство воспроизведения изменено: {device_name if device_name else 'По умолчанию'}")
+
     def handle_media_status(self, status):
         """Обрабатывает статус медиаплеера"""
         if status == QMediaPlayer.EndOfMedia:
@@ -820,7 +904,14 @@ class GoogleWebSpeechTranslator(QMainWindow):
         """Рабочий поток для тестирования TTS"""
         try:
             # Используем голос из настроек
-            voice_id = self.voice_id_input.text().strip()
+            # Получаем voice_id из комбобокса
+            current_index = self.voice_combo.currentIndex()
+            if current_index >= 0:
+                voice_id = self.voice_combo.itemData(current_index)
+                if not voice_id:
+                    voice_id = self.voice_combo.currentText().strip()
+            else:
+                voice_id = self.voice_combo.currentText().strip()
             if not voice_id:
                 voice_id = self.config['tts_voice_id']
 
@@ -1986,19 +2077,52 @@ class GoogleWebSpeechTranslator(QMainWindow):
 
         voice_layout.addWidget(speed_widget, 1, 1, 1, 2)
 
-        # Voice ID
-        voice_id_label = QLabel("ID голоса:")
+        # Voice ID с выбором из списка (QComboBox)
+        voice_id_label = QLabel("Голос:")
         voice_layout.addWidget(voice_id_label, 2, 0)
 
-        self.voice_id_input = QLineEdit()
-        self.voice_id_input.setText(self.config['tts_voice_id'])
-        self.voice_id_input.textChanged.connect(
-            lambda text: self.update_tts_setting('tts_voice_id', text))
-
-        voice_id_info = QLabel("21m00Tcm4TlvDq8ikWAM - Rachel (по умолчанию)")
+        self.voice_combo = QComboBox()
+        # НЕ делаем редактируемым - это обычный комбобокс с выпадающим списком
+        self.voice_combo.setEditable(False)
+        self.voice_combo.setStyleSheet("""
+            QComboBox {
+                font-family: "Segoe UI", Arial, sans-serif;
+                font-size: 11px;
+            }
+            QComboBox QAbstractItemView {
+                font-family: "Segoe UI", Arial, sans-serif;
+                font-size: 11px;
+            }
+        """)
+        
+        # Подключаем сигнал выбора из списка
+        self.voice_combo.activated.connect(self.on_voice_selected)
+        
+        # Сохраняем оригинальный метод showPopup
+        original_show_popup = self.voice_combo.showPopup
+        self._voice_combo_loading = False  # Флаг загрузки голосов
+        
+        # Переопределяем showPopup для загрузки голосов при открытии
+        def show_popup_with_load():
+            # Если список пуст и не идет загрузка, загружаем голоса
+            if self.voice_combo.count() == 0 and not self._voice_combo_loading:
+                self._voice_combo_loading = True
+                self.load_voices_into_combo()
+                # Не открываем popup сразу - он откроется после загрузки через сигнал
+                return
+            # Если список не пуст, открываем popup
+            if self.voice_combo.count() > 0:
+                original_show_popup()
+        
+        self.voice_combo.showPopup = show_popup_with_load
+        self._voice_combo_loading = False  # Инициализируем флаг
+        
+        # Не добавляем временный элемент - комбобокс будет пустым до загрузки голосов
+        
+        voice_layout.addWidget(self.voice_combo, 2, 1, 1, 2)
+        
+        voice_id_info = QLabel("Нажмите на стрелку для выбора голоса из списка")
         voice_id_info.setStyleSheet("color: #888888; font-size: 10px; font-style: italic;")
-
-        voice_layout.addWidget(self.voice_id_input, 2, 1, 1, 2)
         voice_layout.addWidget(voice_id_info, 3, 1, 1, 2)
 
         scroll_layout.addWidget(voice_group)
@@ -2108,13 +2232,32 @@ class GoogleWebSpeechTranslator(QMainWindow):
 
     def save_all_settings(self, dialog):
         """Сохраняет все настройки (основные + TTS) и закрывает диалог"""
-        # Сохраняем TTS настройки
-        self.config['elevenlabs_api_key'] = self.api_key_input.text()
-        self.config['tts_voice_id'] = self.voice_id_input.text()
-        # Сохраняем конфигурацию (включая секреты)
-        save_config(self.config)
-        dialog.accept()
-        self.message_queue.put(('info', "✅ Все настройки сохранены"))
+        try:
+            # Сохраняем TTS настройки
+            self.config['elevenlabs_api_key'] = self.api_key_input.text()
+            
+            # Получаем voice_id из комбобокса
+            current_index = self.voice_combo.currentIndex()
+            if current_index >= 0:
+                voice_id = self.voice_combo.itemData(current_index)
+                if voice_id:
+                    self.config['tts_voice_id'] = voice_id
+                else:
+                    # Если данных нет, используем текст (на случай ручного ввода, если комбобокс редактируемый)
+                    self.config['tts_voice_id'] = self.voice_combo.currentText()
+            else:
+                # Если ничего не выбрано, используем текущий текст
+                self.config['tts_voice_id'] = self.voice_combo.currentText()
+            
+            # Сохраняем конфигурацию (включая секреты)
+            save_config(self.config)
+            dialog.accept()
+            self.message_queue.put(('info', "✅ Все настройки сохранены"))
+        except Exception as e:
+            print(f"❌ DEBUG: Ошибка сохранения настроек: {e}")
+            import traceback
+            print(traceback.format_exc())
+            QMessageBox.warning(self, "Ошибка", f"Ошибка сохранения настроек: {str(e)}")
 
     def change_max_messages(self, value):
         """Изменяет максимальное количество сообщений"""
@@ -2164,6 +2307,139 @@ class GoogleWebSpeechTranslator(QMainWindow):
         if self.recognizer:
             self.recognizer.pause_threshold = value
         save_config(self.config)  # Сохраняем конфиг
+
+    def on_voice_selected(self, index):
+        """Обрабатывает выбор голоса из комбобокса"""
+        if index >= 0:
+            voice_id = self.voice_combo.itemData(index)
+            if voice_id:
+                self.update_tts_setting('tts_voice_id', voice_id)
+                self.message_queue.put(('info', f"✅ Выбран голос: {self.voice_combo.currentText()}"))
+    
+    def on_voice_text_changed(self, text):
+        """Обрабатывает изменение текста в комбобоксе (ручной ввод)"""
+        if text and not self.voice_combo.itemData(self.voice_combo.currentIndex()):
+            # Если текст введен вручную, сохраняем его как ID
+            self.update_tts_setting('tts_voice_id', text)
+    
+    def load_voices_into_combo(self):
+        """Загружает список голосов из ElevenLabs API в комбобокс"""
+        api_key = self.config.get('elevenlabs_api_key', '').strip()
+        if not api_key:
+            QMessageBox.warning(self, "Ошибка", 
+                "API ключ ElevenLabs не установлен.\n\n"
+                "Введите ключ в настройках перед выбором голоса.")
+            return
+        
+        if not api_key.startswith("sk_"):
+            QMessageBox.warning(self, "Ошибка", 
+                "Неверный формат API ключа.\n\n"
+                "Ключ должен начинаться с 'sk_'")
+            return
+        
+        # Показываем прогресс
+        self.message_queue.put(('status', "🔍 Загрузка списка голосов..."))
+        
+        # Загружаем голоса в отдельном потоке
+        def load_voices():
+            try:
+                url = "https://api.elevenlabs.io/v1/voices"
+                headers = {
+                    "xi-api-key": api_key
+                }
+                
+                print(f"🔊 DEBUG: Запрос списка голосов...")
+                response = requests.get(url, headers=headers, timeout=10)
+                print(f"🔊 DEBUG: Статус ответа: {response.status_code}")
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    voices = data.get('voices', [])
+                    print(f"🔊 DEBUG: Получено голосов: {len(voices)}")
+                    if voices:
+                        print(f"🔊 DEBUG: Первый голос: {voices[0].get('name', 'N/A')}")
+                    
+                    # Передаем результат в главный поток через сигнал
+                    print(f"🔊 DEBUG: Отправляю сигнал с {len(voices)} голосами")
+                    self.voices_loaded.emit(voices)
+                elif response.status_code == 401:
+                    error_text = response.text
+                    print(f"❌ DEBUG: 401 ошибка: {error_text}")
+                    error_msg = "Неверный API ключ ElevenLabs."
+                    QTimer.singleShot(0, lambda: QMessageBox.warning(self, "Ошибка", error_msg))
+                else:
+                    error_text = response.text[:100] if response.text else ""
+                    error_msg = f"Ошибка загрузки голосов: {response.status_code}\n{error_text}"
+                    print(f"❌ DEBUG: Ошибка {response.status_code}: {error_text}")
+                    QTimer.singleShot(0, lambda: QMessageBox.warning(self, "Ошибка", error_msg))
+            except requests.exceptions.RequestException as e:
+                error_msg = f"Ошибка сети при загрузке голосов: {str(e)}"
+                print(f"❌ DEBUG: {error_msg}")
+                QTimer.singleShot(0, lambda: QMessageBox.warning(self, "Ошибка", error_msg))
+            except Exception as e:
+                error_msg = f"Ошибка при загрузке голосов: {str(e)}"
+                print(f"❌ DEBUG: {error_msg}")
+                import traceback
+                print(traceback.format_exc())
+                QTimer.singleShot(0, lambda: QMessageBox.warning(self, "Ошибка", error_msg))
+        
+        threading.Thread(target=load_voices, daemon=True).start()
+    
+    def show_voice_selection_dialog(self, voices):
+        """Заполняет комбобокс списком голосов (вызывается через сигнал из потока)"""
+        print(f"🔊 DEBUG: Заполняю комбобокс с {len(voices) if voices else 0} голосами")
+        if not voices:
+            print("❌ DEBUG: Список голосов пуст")
+            # Добавляем сообщение в комбобокс
+            self.voice_combo.clear()
+            self.voice_combo.addItem("Голоса не найдены", "")
+            QMessageBox.information(self, "Информация", "Голоса не найдены.")
+            return
+        
+        # Очищаем комбобокс
+        self.voice_combo.clear()
+        
+        # Добавляем голоса в комбобокс
+        current_voice_id = self.config.get('tts_voice_id', '')
+        current_index = 0
+        
+        for i, voice in enumerate(voices):
+            voice_id = voice.get('voice_id', '')
+            name = voice.get('name', 'Без имени')
+            description = voice.get('description', '')
+            
+            # Формируем текст для отображения
+            if description:
+                display_text = f"{name} - {description}"
+            else:
+                display_text = name
+            
+            # Добавляем в комбобокс с ID в данных
+            self.voice_combo.addItem(display_text, voice_id)
+            print(f"🔊 DEBUG: Добавлен голос {i+1}/{len(voices)}: {display_text[:50]}")
+            
+            # Если это текущий выбранный голос, запоминаем индекс
+            if voice_id == current_voice_id:
+                current_index = i
+        
+        # Проверяем количество элементов в комбобоксе
+        combo_count = self.voice_combo.count()
+        print(f"🔊 DEBUG: В комбобоксе элементов: {combo_count}, ожидалось: {len(voices)}")
+        
+        # Устанавливаем текущий выбор
+        if current_voice_id and current_index < combo_count:
+            self.voice_combo.setCurrentIndex(current_index)
+        elif combo_count > 0:
+            # Если текущий голос не найден, выбираем первый
+            self.voice_combo.setCurrentIndex(0)
+        
+        print(f"🔊 DEBUG: Комбобокс заполнен. Всего элементов: {self.voice_combo.count()}")
+        self.message_queue.put(('info', f"✅ Загружено {combo_count} голосов"))
+        
+        # Сбрасываем флаг загрузки
+        self._voice_combo_loading = False
+        
+        # НЕ открываем popup автоматически - пользователь сам откроет его при необходимости
 
     def mousePressEvent(self, event):
         """Перетаскивание окна"""

@@ -22,6 +22,7 @@ DEFAULT_CONFIG = {
     'energy_threshold': 300,
     'pause_threshold': 0.8,
     'selected_mic_index': 0,
+    'selected_output_device': '',  # Имя устройства воспроизведения (пустое = по умолчанию)
     'translation_timeout': 5,
     'auto_detect_language': True,
     'listen_timeout': 10,
