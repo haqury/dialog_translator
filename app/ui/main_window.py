@@ -1783,31 +1783,54 @@ class GoogleWebSpeechTranslator(QMainWindow):
                 color: white;
                 selection-background-color: #6A1B9A;
             }
+            QTabWidget::pane {
+                border: 1px solid rgba(60, 65, 75, 180);
+                border-radius: 4px;
+                background-color: rgba(25, 30, 40, 230);
+            }
+            QTabBar::tab {
+                background-color: rgba(40, 45, 55, 180);
+                color: white;
+                padding: 8px 20px;
+                margin-right: 2px;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+            }
+            QTabBar::tab:selected {
+                background-color: rgba(106, 27, 154, 200);
+                color: white;
+            }
+            QTabBar::tab:hover {
+                background-color: rgba(50, 55, 65, 200);
+            }
         """)
 
-        # Создаем основной контейнер с прокруткой
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-
-        scroll_content = QWidget()
-        scroll_layout = QVBoxLayout(scroll_content)
-        scroll_layout.setSpacing(12)
-        scroll_layout.setContentsMargins(15, 15, 15, 15)
-
-        # Заголовок
-        title = QLabel("⚙️ Настройки приложения")
-        title.setStyleSheet("""
-            font-size: 16px;
-            font-weight: bold;
-            color: #4ECDC4;
-            padding-bottom: 10px;
-            border-bottom: 2px solid rgba(78, 205, 196, 100);
-        """)
-        title.setAlignment(Qt.AlignCenter)
-        scroll_layout.addWidget(title)
-
-        # ==== Виджет статуса ошибок TTS ====
+        # Создаем вкладки для настроек
+        tabs = QTabWidget()
+        
+        # ==== ВКЛАДКА 1: Основные настройки ====
+        main_tab = QWidget()
+        main_scroll = QScrollArea()
+        main_scroll.setWidgetResizable(True)
+        main_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        
+        main_content = QWidget()
+        main_layout = QVBoxLayout(main_content)
+        main_layout.setSpacing(12)
+        main_layout.setContentsMargins(15, 15, 15, 15)
+        
+        # ==== ВКЛАДКА 2: TTS настройки ====
+        tts_tab = QWidget()
+        tts_scroll = QScrollArea()
+        tts_scroll.setWidgetResizable(True)
+        tts_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        
+        tts_content = QWidget()
+        tts_layout = QVBoxLayout(tts_content)
+        tts_layout.setSpacing(12)
+        tts_layout.setContentsMargins(15, 15, 15, 15)
+        
+        # ==== Виджет статуса ошибок TTS (только для TTS вкладки) ====
         self.error_widget = QWidget()
         self.error_widget.setVisible(False)
         error_layout = QHBoxLayout(self.error_widget)
@@ -1823,7 +1846,7 @@ class GoogleWebSpeechTranslator(QMainWindow):
         error_layout.addWidget(error_icon)
         error_layout.addWidget(self.error_label, 1)
 
-        scroll_layout.addWidget(self.error_widget)
+        tts_layout.addWidget(self.error_widget)
 
         # ==== ГРУППА: Внешний вид ====
         appearance_group = QGroupBox("Внешний вид")
@@ -1860,7 +1883,7 @@ class GoogleWebSpeechTranslator(QMainWindow):
 
         messages_spin.valueChanged.connect(self.change_max_messages)
 
-        scroll_layout.addWidget(appearance_group)
+        main_layout.addWidget(appearance_group)
 
         # ==== ГРУППА: Распознавание речи ====
         recognition_group = QGroupBox("Распознавание речи")
@@ -1906,7 +1929,7 @@ class GoogleWebSpeechTranslator(QMainWindow):
 
         pause_spin.valueChanged.connect(lambda v: self.update_pause_threshold(v))
 
-        scroll_layout.addWidget(recognition_group)
+        main_layout.addWidget(recognition_group)
 
         # ==== ГРУППА: Дополнительные функции ====
         features_group = QGroupBox("Дополнительные функции")
@@ -1926,7 +1949,15 @@ class GoogleWebSpeechTranslator(QMainWindow):
         info_label.setStyleSheet("color: #888888; font-size: 10px; padding-left: 24px; font-style: italic;")
         features_layout.addWidget(info_label)
 
-        scroll_layout.addWidget(features_group)
+        main_layout.addWidget(features_group)
+        
+        main_layout.addStretch()
+        
+        # Устанавливаем содержимое для вкладки "Основные"
+        main_scroll.setWidget(main_content)
+        main_tab_layout = QVBoxLayout(main_tab)
+        main_tab_layout.setContentsMargins(0, 0, 0, 0)
+        main_tab_layout.addWidget(main_scroll)
 
         # ==== ГРУППА: ElevenLabs TTS - Активация ====
         activation_group = QGroupBox("🔊 Озвучивание (ElevenLabs TTS)")
@@ -1939,7 +1970,7 @@ class GoogleWebSpeechTranslator(QMainWindow):
             lambda state: self.update_tts_setting('enable_tts', state == Qt.Checked))
 
         activation_layout.addWidget(self.tts_enable_checkbox)
-        scroll_layout.addWidget(activation_group)
+        tts_layout.addWidget(activation_group)
 
         # ==== ГРУППА: ElevenLabs TTS - API Настройки ====
         api_group = QGroupBox("API Настройки")
@@ -1974,7 +2005,7 @@ class GoogleWebSpeechTranslator(QMainWindow):
         info_layout.addStretch()
 
         api_layout.addWidget(info_widget)
-        scroll_layout.addWidget(api_group)
+        tts_layout.addWidget(api_group)
 
         # ==== ГРУППА: ElevenLabs TTS - Модель ====
         model_group = QGroupBox("Модель TTS")
@@ -2009,7 +2040,7 @@ class GoogleWebSpeechTranslator(QMainWindow):
         model_info.setStyleSheet("color: #888888; font-size: 10px; font-style: italic;")
         model_layout.addWidget(model_info)
 
-        scroll_layout.addWidget(model_group)
+        tts_layout.addWidget(model_group)
 
         # ==== ГРУППА: ElevenLabs TTS - Настройки голоса ====
         voice_group = QGroupBox("Настройки голоса")
@@ -2125,7 +2156,7 @@ class GoogleWebSpeechTranslator(QMainWindow):
         voice_id_info.setStyleSheet("color: #888888; font-size: 10px; font-style: italic;")
         voice_layout.addWidget(voice_id_info, 3, 1, 1, 2)
 
-        scroll_layout.addWidget(voice_group)
+        tts_layout.addWidget(voice_group)
 
         # ==== ГРУППА: ElevenLabs TTS - Автоматизация ====
         auto_group = QGroupBox("Автоматизация")
@@ -2143,17 +2174,24 @@ class GoogleWebSpeechTranslator(QMainWindow):
 
         auto_layout.addWidget(self.auto_play_checkbox)
         auto_layout.addWidget(auto_note)
-        scroll_layout.addWidget(auto_group)
+        tts_layout.addWidget(auto_group)
 
-        scroll_layout.addStretch()
-
-        # Устанавливаем содержимое в scroll area
-        scroll_area.setWidget(scroll_content)
+        tts_layout.addStretch()
+        
+        # Устанавливаем содержимое для вкладки "TTS"
+        tts_scroll.setWidget(tts_content)
+        tts_tab_layout = QVBoxLayout(tts_tab)
+        tts_tab_layout.setContentsMargins(0, 0, 0, 0)
+        tts_tab_layout.addWidget(tts_scroll)
+        
+        # Добавляем вкладки
+        tabs.addTab(main_tab, "📋 Основные")
+        tabs.addTab(tts_tab, "🔊 TTS")
 
         # Основной layout диалога
         main_layout = QVBoxLayout(dialog)
         main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.addWidget(scroll_area)
+        main_layout.addWidget(tabs)
 
         # ==== Кнопки (внизу, вне scroll area) ====
         button_widget = QWidget()
