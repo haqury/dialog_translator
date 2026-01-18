@@ -28,20 +28,28 @@ DEFAULT_CONFIG = {
     'listen_timeout': 10,
     'phrase_time_limit': 10,
     'enable_text_input': False,
-    # Настройки ElevenLabs TTS
+    # Настройки TTS (поддержка нескольких провайдеров)
     'enable_tts': True,
-    'tts_provider': 'elevenlabs',
-    'tts_voice_id': 'CwhRBWXzGAHq8TQ4Fs17',  # Roger по умолчанию
+    'tts_provider': 'elevenlabs',  # elevenlabs, google_cloud
+    'auto_play_tts': False,
     'tts_volume': 80,
     'tts_speed': 1.0,
-    'elevenlabs_api_key': '',  # Пользователь должен ввести свой ключ (секрет)
-    'auto_play_tts': False,
-    # Новые настройки для совместимости с бесплатным тарифом
-    'tts_model': 'eleven_turbo_v2',  # Новая модель для бесплатного тарифа
+    # ElevenLabs настройки
+    'elevenlabs_api_key': '',
+    'elevenlabs_voice_id': 'CwhRBWXzGAHq8TQ4Fs17',  # Roger по умолчанию
+    'elevenlabs_model': 'eleven_turbo_v2',
+    # Google Cloud TTS настройки
+    'google_cloud_api_key': '',
+    'google_cloud_project_id': '',
+    'google_cloud_voice_name': 'ru-RU-Standard-A',
+    'google_cloud_language_code': 'ru-RU',
 }
 
 # Поля, которые считаются секретами (не логируются)
-SECRET_FIELDS = {'elevenlabs_api_key'}
+SECRET_FIELDS = {
+    'elevenlabs_api_key',
+    'google_cloud_api_key'
+}
 
 
 def load_config() -> Dict[str, Any]:
@@ -70,8 +78,23 @@ def load_config() -> Dict[str, Any]:
             if config.get('tts_model') in deprecated_models:
                 print(f"⚠️ Обнаружена устаревшая модель TTS: {config['tts_model']}")
                 print("   Автоматически заменяю на eleven_turbo_v2")
-                config['tts_model'] = 'eleven_turbo_v2'
+                config['elevenlabs_model'] = 'eleven_turbo_v2'
+                if 'tts_model' in config:
+                    del config['tts_model']
                 # Сохраняем обновленный конфиг
+                save_config(config)
+            
+            # Миграция: переносим старые настройки в новые
+            if 'tts_voice_id' in config and 'elevenlabs_voice_id' not in config:
+                config['elevenlabs_voice_id'] = config['tts_voice_id']
+                if config.get('tts_provider') == 'elevenlabs':
+                    del config['tts_voice_id']
+                save_config(config)
+            
+            if 'tts_model' in config and 'elevenlabs_model' not in config:
+                config['elevenlabs_model'] = config['tts_model']
+                if config.get('tts_provider') == 'elevenlabs':
+                    del config['tts_model']
                 save_config(config)
             
             print(f"✅ Конфигурация загружена из {CONFIG_FILE}")

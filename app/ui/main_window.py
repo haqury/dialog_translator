@@ -39,6 +39,7 @@ from app.widgets.chat_widget import ChatWidget
 from app.services.translation_service import TranslationService
 from app.services.tts_service import TTSService
 from app.services.speech_service import SpeechService
+from app.services.tts_factory import create_tts_provider
 from app.config import DEFAULT_CONFIG, LANGUAGE_MAP, TTS_VOICES, load_config, save_config
 
 # ChatWidget теперь импортируется из app.widgets.chat_widget
@@ -46,16 +47,23 @@ from app.config import DEFAULT_CONFIG, LANGUAGE_MAP, TTS_VOICES, load_config, sa
 class GoogleWebSpeechTranslator(QMainWindow):
     # Сигнал для передачи списка голосов из потока в главный поток
     voices_loaded = pyqtSignal(list)
+    # Сигнал для воспроизведения аудио из потока в главный поток
+    audio_ready = pyqtSignal(str, int)  # file_path, volume
     
     def __init__(self):
         super().__init__()
         
-        # Подключаем сигнал
+        # Подключаем сигналы
         def on_voices_loaded(voices):
             print(f"🔊 DEBUG: Сигнал voices_loaded получен с {len(voices) if voices else 0} голосами")
             self.show_voice_selection_dialog(voices)
         
+        def on_audio_ready_signal(file_path, volume):
+            print(f"🔊 DEBUG: Сигнал audio_ready получен: {file_path}, volume: {volume}")
+            self._play_audio_file(file_path, volume)
+        
         self.voices_loaded.connect(on_voices_loaded)
+        self.audio_ready.connect(on_audio_ready_signal)
 
         # Загружаем настройки из файла или используем по умолчанию
         self.config = load_config()
@@ -88,8 +96,13 @@ class GoogleWebSpeechTranslator(QMainWindow):
         # Для TTS (Text-to-Speech)
         self.tts_player = QMediaPlayer()
         self.tts_player.mediaStatusChanged.connect(self.handle_media_status)
+        self.tts_player.error.connect(self.handle_player_error)
         self.current_tts_file = None
         self.is_playing_tts = False
+        
+        # Проверяем поддержку форматов
+        from PyQt5.QtMultimedia import QMediaPlayer as QMP
+        print(f"🔊 DEBUG: Поддерживаемые MIME типы: {QMP.supportedMimeTypes()}")
 
         # Инициализация UI
         self.init_ui()
@@ -243,7 +256,7 @@ class GoogleWebSpeechTranslator(QMainWindow):
             self.mic_combo.setFixedWidth(80)
 
         layout.addWidget(self.mic_combo)
-        
+
         # Выбор устройства воспроизведения
         self.output_combo = QComboBox()
         try:
@@ -266,8 +279,8 @@ class GoogleWebSpeechTranslator(QMainWindow):
                 self.output_combo.setStyleSheet("""
                     QComboBox {
                         font-family: "Segoe UI", Arial, sans-serif;
-                        font-size: 11px;
-                    }
+                font-size: 11px;
+            }
                     QComboBox QAbstractItemView {
                         font-family: "Segoe UI", Arial, sans-serif;
                         font-size: 11px;
@@ -291,8 +304,8 @@ class GoogleWebSpeechTranslator(QMainWindow):
                 QComboBox QAbstractItemView {
                     font-family: "Segoe UI", Arial, sans-serif;
                     font-size: 11px;
-                }
-            """)
+            }
+        """)
             self.output_combo.currentIndexChanged.connect(self.on_output_device_changed)
         
         layout.addWidget(self.output_combo)
@@ -579,30 +592,90 @@ class GoogleWebSpeechTranslator(QMainWindow):
         self.setStyleSheet(style)
 
     def speak_text(self, text, source_lang="en"):
-        """Озвучивает текст через ElevenLabs"""
-        if not self.config['enable_tts'] or not text.strip():
+        """Озвучивает текст через выбранный TTS провайдер"""
+        print(f"🔊 DEBUG: === speak_text вызван ===")
+        print(f"🔊 DEBUG: Текст: '{text[:50]}...'")
+        print(f"🔊 DEBUG: Язык: {source_lang}")
+        print(f"🔊 DEBUG: enable_tts: {self.config.get('enable_tts', False)}")
+        
+        if not self.config.get('enable_tts', False):
+            print(f"❌ DEBUG: TTS отключен в настройках")
+            return
+            
+        if not text.strip():
+            print(f"❌ DEBUG: Текст пустой")
             return
 
-        if not self.config['elevenlabs_api_key']:
-            self.message_queue.put(('error', "❌ ElevenLabs API ключ не установлен"))
-            return
+        try:
+            print(f"🔊 DEBUG: Создаю провайдер...")
+            # Создаем провайдер на основе конфига
+            provider = create_tts_provider(
+                self.config,
+                message_callback=lambda t, m: self.message_queue.put((t, m))
+            )
+            
+            if not provider:
+                error_msg = f"❌ Не удалось создать провайдер: {self.config.get('tts_provider', 'unknown')}"
+                print(f"❌ DEBUG: {error_msg}")
+                self.message_queue.put(('error', error_msg))
+                return
 
-        # Определяем голос в зависимости от языка
-        voice_id = self.config['tts_voice_id']
-        if source_lang == 'ru':
-            # Для русского можно использовать другой голос
-            voice_id = 'IKne3meq5aSn9XLyUdCD'  # Default Russian voice
-        elif source_lang == 'es':
-            voice_id = 'MF3mGyEYCl7XYWbV9V6O'  # Default Spanish voice
-        elif source_lang == 'fr':
-            voice_id = 'N2lVS1w4EtoT3dr4eOWO'  # Default French voice
-        elif source_lang == 'de':
-            voice_id = 'ThT5KcBeYPX3keUQqHPh'  # Default German voice
+            print(f"🔊 DEBUG: Провайдер создан: {type(provider).__name__}")
 
-        # Запускаем в отдельном потоке
-        threading.Thread(target=self.elevenlabs_tts_worker,
-                        args=(text, voice_id),
-                        daemon=True).start()
+            # Получаем настройки для провайдера
+            provider_name = self.config.get('tts_provider', 'elevenlabs')
+            voice_id = None
+            speed = self.config.get('tts_speed', 1.0)
+            volume = self.config.get('tts_volume', 80)
+            
+            print(f"🔊 DEBUG: Провайдер: {provider_name}, скорость: {speed}, громкость: {volume}")
+            
+            # Определяем voice_id в зависимости от провайдера
+            if provider_name == 'elevenlabs':
+                voice_id = self.config.get('elevenlabs_voice_id', 'CwhRBWXzGAHq8TQ4Fs17')
+                # Можно переопределить по языку
+                if source_lang == 'ru':
+                    voice_id = 'IKne3meq5aSn9XLyUdCD'
+                elif source_lang == 'es':
+                    voice_id = 'MF3mGyEYCl7XYWbV9V6O'
+                elif source_lang == 'fr':
+                    voice_id = 'N2lVS1w4EtoT3dr4eOWO'
+                elif source_lang == 'de':
+                    voice_id = 'ThT5KcBeYPX3keUQqHPh'
+            elif provider_name == 'google_cloud':
+                voice_id = self.config.get('google_cloud_voice_name', 'ru-RU-Standard-A')
+            
+            print(f"🔊 DEBUG: Voice ID: {voice_id}")
+            
+            # Вызываем speak провайдера
+            def on_audio_ready(file_path):
+                """Callback для воспроизведения аудио (вызывается из потока)"""
+                print(f"🔊 DEBUG: === Callback on_audio_ready вызван ===")
+                print(f"🔊 DEBUG: Файл: {file_path}")
+                if not file_path or not os.path.exists(file_path):
+                    print(f"❌ DEBUG: Файл не существует: {file_path}")
+                    self.message_queue.put(('error', "❌ Аудио файл не найден"))
+                    return
+                
+                file_size = os.path.getsize(file_path)
+                print(f"🔊 DEBUG: Размер файла: {file_size} байт")
+                if file_size == 0:
+                    print(f"❌ DEBUG: Файл пустой!")
+                    self.message_queue.put(('error', "❌ Аудио файл пустой"))
+                    return
+                
+                # Используем сигнал для безопасного вызова в главном потоке
+                print(f"🔊 DEBUG: Отправляю сигнал audio_ready в главный поток (volume={volume})")
+                self.audio_ready.emit(file_path, volume)
+            
+            print(f"🔊 DEBUG: Вызываю provider.speak()...")
+            provider.speak(text, source_lang, voice_id, speed, volume, on_audio_ready)
+            print(f"🔊 DEBUG: provider.speak() вызван, жду callback...")
+        except Exception as e:
+            print(f"❌ DEBUG: Ошибка в speak_text: {e}")
+            import traceback
+            print(traceback.format_exc())
+            self.message_queue.put(('error', f"❌ Ошибка озвучивания: {str(e)[:50]}"))
 
     def elevenlabs_tts_worker(self, text, voice_id):
         """Поток для работы с ElevenLabs API"""
@@ -825,19 +898,122 @@ class GoogleWebSpeechTranslator(QMainWindow):
             save_config(self.config)
             print(f"✅ Устройство воспроизведения изменено: {device_name if device_name else 'По умолчанию'}")
 
-    def handle_media_status(self, status):
-        """Обрабатывает статус медиаплеера"""
-        if status == QMediaPlayer.EndOfMedia:
-            self.is_playing_tts = False
-            # Удаляем временный файл
-            if self.current_tts_file and os.path.exists(self.current_tts_file):
+    def _play_audio_file(self, file_path, volume):
+        """Воспроизводит аудио файл (вызывается из главного потока через сигнал)"""
+        try:
+            print(f"🔊 DEBUG: === _play_audio_file ВЫЗВАН ===")
+            print(f"🔊 DEBUG: Файл: {file_path}")
+            print(f"🔊 DEBUG: Размер: {os.path.getsize(file_path)} байт")
+            
+            if not os.path.exists(file_path):
+                print(f"❌ DEBUG: Файл удален до воспроизведения: {file_path}")
+                return
+            
+            # Останавливаем предыдущее воспроизведение
+            if self.tts_player.state() == QMediaPlayer.PlayingState:
+                print(f"🔊 DEBUG: Останавливаю предыдущее воспроизведение")
+                self.tts_player.stop()
+            
+            # Удаляем предыдущий временный файл
+            if self.current_tts_file and os.path.exists(self.current_tts_file) and self.current_tts_file != file_path:
                 try:
                     os.unlink(self.current_tts_file)
-                    self.current_tts_file = None
                 except:
                     pass
-        elif status == QMediaPlayer.InvalidMedia:
-            self.message_queue.put(('error', "❌ Ошибка воспроизведения аудио"))
+            
+            self.current_tts_file = file_path
+            url = QUrl.fromLocalFile(file_path)
+            print(f"🔊 DEBUG: URL создан: {url.toString()}, валидный: {url.isValid()}")
+            if not url.isValid():
+                print(f"❌ DEBUG: Неверный URL: {file_path}")
+                return
+            
+            media_content = QMediaContent(url)
+            print(f"🔊 DEBUG: Устанавливаю медиа: {file_path}")
+            self.tts_player.setMedia(media_content)
+            print(f"🔊 DEBUG: Медиа установлено, статус: {self.tts_player.mediaStatus()}")
+            
+            # Ждем немного, чтобы медиа загрузилось
+            print(f"🔊 DEBUG: Планирую запуск воспроизведения через 100мс")
+            QTimer.singleShot(100, lambda: self._start_playback(volume))
+            
+        except Exception as e:
+            print(f"❌ Ошибка в _play_audio_file: {e}")
+            import traceback
+            print(traceback.format_exc())
+            self.message_queue.put(('error', f"❌ Ошибка воспроизведения: {str(e)[:50]}"))
+
+    def _start_playback(self, volume):
+        """Запускает воспроизведение после загрузки медиа"""
+        try:
+            print(f"🔊 DEBUG: === _start_playback ВЫЗВАН ===")
+            print(f"🔊 DEBUG: Состояние плеера: {self.tts_player.state()}")
+            print(f"🔊 DEBUG: Статус медиа: {self.tts_player.mediaStatus()}")
+            self.tts_player.setVolume(volume)
+            print(f"🔊 DEBUG: Громкость установлена: {volume}")
+            self.is_playing_tts = True
+            self.tts_player.play()
+            print(f"🔊 DEBUG: Состояние плеера после play: {self.tts_player.state()}")
+            error = self.tts_player.error()
+            if error != QMediaPlayer.NoError:
+                print(f"❌ DEBUG: Ошибка плеера: {error} - {self.tts_player.errorString()}")
+            else:
+                print(f"🔊 DEBUG: Воспроизведение запущено успешно")
+            self.message_queue.put(('info', "🔊 Воспроизведение..."))
+        except Exception as e:
+            print(f"❌ Ошибка в _start_playback: {e}")
+            import traceback
+            print(traceback.format_exc())
+
+    def handle_player_error(self, error):
+        """Обрабатывает ошибки медиаплеера"""
+        error_string = self.tts_player.errorString()
+        print(f"❌ DEBUG: Ошибка плеера: {error} - {error_string}")
+        self.message_queue.put(('error', f"❌ Ошибка воспроизведения: {error_string}"))
+        self.is_playing_tts = False
+
+    def handle_media_status(self, status):
+        """Обрабатывает статус медиаплеера"""
+        try:
+            status_names = {
+                QMediaPlayer.NoMedia: "NoMedia",
+                QMediaPlayer.LoadingMedia: "LoadingMedia",
+                QMediaPlayer.LoadedMedia: "LoadedMedia",
+                QMediaPlayer.BufferingMedia: "BufferingMedia",
+                QMediaPlayer.BufferedMedia: "BufferedMedia",
+                QMediaPlayer.StalledMedia: "StalledMedia",
+                QMediaPlayer.EndOfMedia: "EndOfMedia",
+                QMediaPlayer.InvalidMedia: "InvalidMedia"
+            }
+            status_name = status_names.get(status, f"Unknown({status})")
+            print(f"🔊 DEBUG: Статус медиа изменен: {status_name}")
+            
+            if status == QMediaPlayer.EndOfMedia:
+                print(f"🔊 DEBUG: Воспроизведение завершено")
+                self.is_playing_tts = False
+                # Удаляем временный файл
+                if self.current_tts_file and os.path.exists(self.current_tts_file):
+                    try:
+                        os.unlink(self.current_tts_file)
+                        self.current_tts_file = None
+                    except Exception as e:
+                        print(f"⚠️ Не удалось удалить временный файл: {e}")
+            elif status == QMediaPlayer.InvalidMedia:
+                print(f"❌ DEBUG: Неверное медиа")
+                error = self.tts_player.error()
+                print(f"❌ DEBUG: Ошибка плеера: {error} - {self.tts_player.errorString()}")
+                self.is_playing_tts = False
+                self.message_queue.put(('error', f"❌ Ошибка воспроизведения: {self.tts_player.errorString()}"))
+            elif status == QMediaPlayer.LoadedMedia:
+                print(f"🔊 DEBUG: Медиа загружено: {self.current_tts_file}")
+                # Проверяем, что плеер готов к воспроизведению
+                if self.tts_player.state() != QMediaPlayer.PlayingState:
+                    print(f"🔊 DEBUG: Автоматически запускаю воспроизведение после загрузки")
+                    self.tts_player.play()
+        except Exception as e:
+            print(f"❌ Ошибка в handle_media_status: {e}")
+            import traceback
+            print(traceback.format_exc())
 
     # Старый метод show_tts_settings() удален - теперь все настройки в show_settings()
 
@@ -1205,10 +1381,22 @@ class GoogleWebSpeechTranslator(QMainWindow):
                                 timeout=self.config['listen_timeout'],
                                 phrase_time_limit=self.config['phrase_time_limit']
                             )
-                        except Exception as e:
-                            print(f"⚠️ Ошибка захвата аудио: {e}")
-                            time.sleep(0.5)
+                        except sr.WaitTimeoutError:
+                            # Таймаут - это нормально, просто продолжаем слушать
+                            # Не выводим сообщение, чтобы не засорять консоль
                             continue
+                        except Exception as e:
+                            error_msg = str(e).lower()
+                            # Показываем только реальные ошибки, не таймауты
+                            # Фильтруем различные варианты сообщений о таймауте
+                            timeout_keywords = ["timed out", "timeout", "waiting for phrase", "listening timed"]
+                            is_timeout = any(keyword in error_msg for keyword in timeout_keywords)
+                            
+                            if not is_timeout:
+                                print(f"⚠️ Ошибка захвата аудио: {e}")
+                                # Для таймаутов просто продолжаем без сообщения
+                                time.sleep(0.1)  # Короткая пауза для таймаутов
+                                continue
 
                         # Сбрасываем счетчик ошибок
                         consecutive_errors = 0
@@ -1959,8 +2147,45 @@ class GoogleWebSpeechTranslator(QMainWindow):
         main_tab_layout.setContentsMargins(0, 0, 0, 0)
         main_tab_layout.addWidget(main_scroll)
 
-        # ==== ГРУППА: ElevenLabs TTS - Активация ====
-        activation_group = QGroupBox("🔊 Озвучивание (ElevenLabs TTS)")
+        # ==== ГРУППА: Выбор провайдера TTS ====
+        provider_group = QGroupBox("Провайдер TTS")
+        provider_layout = QVBoxLayout(provider_group)
+        provider_layout.setSpacing(8)
+        provider_layout.setContentsMargins(12, 15, 12, 12)
+        
+        provider_label = QLabel("Выберите провайдер озвучивания:")
+        provider_label.setStyleSheet("font-weight: bold; margin-bottom: 5px;")
+        provider_layout.addWidget(provider_label)
+        
+        self.provider_combo = QComboBox()
+        self.provider_combo.addItems([
+            "ElevenLabs",
+            "Google Cloud TTS"
+        ])
+        
+        # Устанавливаем текущий провайдер
+        current_provider = self.config.get('tts_provider', 'elevenlabs')
+        provider_map = {
+            'elevenlabs': 0,
+            'google_cloud': 1
+        }
+        # Если выбран удаленный провайдер, сбрасываем на elevenlabs
+        if current_provider not in provider_map:
+            current_provider = 'elevenlabs'
+            self.config['tts_provider'] = 'elevenlabs'
+        self.provider_combo.setCurrentIndex(provider_map.get(current_provider, 0))
+        self.provider_combo.currentIndexChanged.connect(self.on_provider_changed)
+        
+        provider_layout.addWidget(self.provider_combo)
+        
+        provider_info = QLabel("Каждый провайдер имеет свои настройки и API ключи")
+        provider_info.setStyleSheet("color: #888888; font-size: 10px; font-style: italic;")
+        provider_layout.addWidget(provider_info)
+        
+        tts_layout.addWidget(provider_group)
+
+        # ==== ГРУППА: TTS - Активация ====
+        activation_group = QGroupBox("🔊 Озвучивание")
         activation_layout = QHBoxLayout(activation_group)
         activation_layout.setContentsMargins(12, 15, 12, 12)
 
@@ -1972,6 +2197,10 @@ class GoogleWebSpeechTranslator(QMainWindow):
         activation_layout.addWidget(self.tts_enable_checkbox)
         tts_layout.addWidget(activation_group)
 
+        # ==== ГРУППЫ НАСТРОЕК ДЛЯ КАЖДОГО ПРОВАЙДЕРА ====
+        # Словарь для хранения групп настроек каждого провайдера
+        self.provider_settings_groups = {}
+        
         # ==== ГРУППА: ElevenLabs TTS - API Настройки ====
         api_group = QGroupBox("API Настройки")
         api_layout = QVBoxLayout(api_group)
@@ -2006,6 +2235,9 @@ class GoogleWebSpeechTranslator(QMainWindow):
 
         api_layout.addWidget(info_widget)
         tts_layout.addWidget(api_group)
+        
+        # Сохраняем группу для ElevenLabs
+        self.provider_settings_groups['elevenlabs'] = [api_group]
 
         # ==== ГРУППА: ElevenLabs TTS - Модель ====
         model_group = QGroupBox("Модель TTS")
@@ -2041,6 +2273,7 @@ class GoogleWebSpeechTranslator(QMainWindow):
         model_layout.addWidget(model_info)
 
         tts_layout.addWidget(model_group)
+        self.provider_settings_groups['elevenlabs'].append(model_group)
 
         # ==== ГРУППА: ElevenLabs TTS - Настройки голоса ====
         voice_group = QGroupBox("Настройки голоса")
@@ -2137,18 +2370,38 @@ class GoogleWebSpeechTranslator(QMainWindow):
         def show_popup_with_load():
             # Если список пуст и не идет загрузка, загружаем голоса
             if self.voice_combo.count() == 0 and not self._voice_combo_loading:
+                print(f"🔊 DEBUG: Комбобокс пуст, загружаем голоса...")
                 self._voice_combo_loading = True
                 self.load_voices_into_combo()
                 # Не открываем popup сразу - он откроется после загрузки через сигнал
                 return
             # Если список не пуст, открываем popup
             if self.voice_combo.count() > 0:
+                print(f"🔊 DEBUG: Комбобокс заполнен ({self.voice_combo.count()} элементов), открываем popup")
                 original_show_popup()
         
         self.voice_combo.showPopup = show_popup_with_load
         self._voice_combo_loading = False  # Инициализируем флаг
         
-        # Не добавляем временный элемент - комбобокс будет пустым до загрузки голосов
+        # Автоматически загружаем голоса при создании комбобокса, если провайдер - ElevenLabs
+        provider = self.config.get('tts_provider', 'elevenlabs')
+        if provider == 'elevenlabs':
+            # Показываем текущий выбранный голос по voice_id до загрузки списка
+            current_voice_id = self.config.get('elevenlabs_voice_id', '')
+            if current_voice_id:
+                # Добавляем временный элемент с текущим voice_id
+                self.voice_combo.addItem(f"Загрузка голосов... (ID: {current_voice_id[:15]}...)", current_voice_id)
+            
+            api_key = self.config.get('elevenlabs_api_key', '')
+            if api_key and not self._voice_combo_loading:
+                # Загружаем голоса в фоне сразу при создании комбобокса
+                self._voice_combo_loading = True
+                self.load_voices_into_combo()
+        elif provider == 'google_cloud':
+            # Для Google Cloud показываем текущий голос
+            current_voice_name = self.config.get('google_cloud_voice_name', '')
+            if current_voice_name:
+                self.voice_combo.addItem(current_voice_name, current_voice_name)
         
         voice_layout.addWidget(self.voice_combo, 2, 1, 1, 2)
         
@@ -2157,6 +2410,7 @@ class GoogleWebSpeechTranslator(QMainWindow):
         voice_layout.addWidget(voice_id_info, 3, 1, 1, 2)
 
         tts_layout.addWidget(voice_group)
+        self.provider_settings_groups['elevenlabs'].append(voice_group)
 
         # ==== ГРУППА: ElevenLabs TTS - Автоматизация ====
         auto_group = QGroupBox("Автоматизация")
@@ -2175,6 +2429,16 @@ class GoogleWebSpeechTranslator(QMainWindow):
         auto_layout.addWidget(self.auto_play_checkbox)
         auto_layout.addWidget(auto_note)
         tts_layout.addWidget(auto_group)
+        self.provider_settings_groups['elevenlabs'].append(auto_group)
+        
+        # ==== ГРУППЫ ДЛЯ ДРУГИХ ПРОВАЙДЕРОВ ====
+        # Google Cloud TTS настройки
+        google_api_group = self._create_google_cloud_settings_group()
+        tts_layout.addWidget(google_api_group)
+        self.provider_settings_groups['google_cloud'] = [google_api_group]
+        
+        # Изначально показываем только настройки текущего провайдера
+        self._update_provider_settings_visibility()
 
         tts_layout.addStretch()
         
@@ -2271,21 +2535,24 @@ class GoogleWebSpeechTranslator(QMainWindow):
     def save_all_settings(self, dialog):
         """Сохраняет все настройки (основные + TTS) и закрывает диалог"""
         try:
-            # Сохраняем TTS настройки
-            self.config['elevenlabs_api_key'] = self.api_key_input.text()
+            # Сохраняем TTS настройки в зависимости от провайдера
+            provider = self.config.get('tts_provider', 'elevenlabs')
             
-            # Получаем voice_id из комбобокса
-            current_index = self.voice_combo.currentIndex()
-            if current_index >= 0:
-                voice_id = self.voice_combo.itemData(current_index)
-                if voice_id:
-                    self.config['tts_voice_id'] = voice_id
-                else:
-                    # Если данных нет, используем текст (на случай ручного ввода, если комбобокс редактируемый)
-                    self.config['tts_voice_id'] = self.voice_combo.currentText()
-            else:
-                # Если ничего не выбрано, используем текущий текст
-                self.config['tts_voice_id'] = self.voice_combo.currentText()
+            if provider == 'elevenlabs':
+                self.config['elevenlabs_api_key'] = self.api_key_input.text()
+                # Получаем voice_id из комбобокса
+                current_index = self.voice_combo.currentIndex()
+                if current_index >= 0:
+                    voice_id = self.voice_combo.itemData(current_index)
+                    if voice_id:
+                        self.config['elevenlabs_voice_id'] = voice_id
+            elif provider == 'google_cloud':
+                if hasattr(self, 'google_api_key_input'):
+                    self.config['google_cloud_api_key'] = self.google_api_key_input.text()
+                if hasattr(self, 'google_project_input'):
+                    self.config['google_cloud_project_id'] = self.google_project_input.text()
+                if hasattr(self, 'google_voice_input'):
+                    self.config['google_cloud_voice_name'] = self.google_voice_input.text()
             
             # Сохраняем конфигурацию (включая секреты)
             save_config(self.config)
@@ -2346,12 +2613,31 @@ class GoogleWebSpeechTranslator(QMainWindow):
             self.recognizer.pause_threshold = value
         save_config(self.config)  # Сохраняем конфиг
 
+    def on_provider_changed(self, index):
+        """Обрабатывает изменение провайдера TTS"""
+        provider_map = {
+            0: 'elevenlabs',
+            1: 'google_cloud'
+        }
+        provider = provider_map.get(index, 'elevenlabs')
+        self.config['tts_provider'] = provider
+        save_config(self.config)
+        self.message_queue.put(('info', f"✅ Выбран провайдер: {self.provider_combo.currentText()}"))
+        # Обновляем видимость настроек в зависимости от провайдера
+        if hasattr(self, 'provider_settings_groups'):
+            self._update_provider_settings_visibility()
+
     def on_voice_selected(self, index):
         """Обрабатывает выбор голоса из комбобокса"""
         if index >= 0:
             voice_id = self.voice_combo.itemData(index)
             if voice_id:
-                self.update_tts_setting('tts_voice_id', voice_id)
+                # Сохраняем voice_id в зависимости от провайдера
+                provider = self.config.get('tts_provider', 'elevenlabs')
+                if provider == 'elevenlabs':
+                    self.update_tts_setting('elevenlabs_voice_id', voice_id)
+                elif provider == 'google_cloud':
+                    self.update_tts_setting('google_cloud_voice_name', voice_id)
                 self.message_queue.put(('info', f"✅ Выбран голос: {self.voice_combo.currentText()}"))
     
     def on_voice_text_changed(self, text):
@@ -2437,8 +2723,16 @@ class GoogleWebSpeechTranslator(QMainWindow):
         # Очищаем комбобокс
         self.voice_combo.clear()
         
-        # Добавляем голоса в комбобокс
-        current_voice_id = self.config.get('tts_voice_id', '')
+        # Получаем текущий voice_id в зависимости от провайдера
+        provider = self.config.get('tts_provider', 'elevenlabs')
+        if provider == 'elevenlabs':
+            current_voice_id = self.config.get('elevenlabs_voice_id', '')
+        elif provider == 'google_cloud':
+            current_voice_id = self.config.get('google_cloud_voice_name', '')
+        else:
+            current_voice_id = ''
+        
+        print(f"🔊 DEBUG: Текущий выбранный voice_id: {current_voice_id}")
         current_index = 0
         
         for i, voice in enumerate(voices):
@@ -2459,6 +2753,7 @@ class GoogleWebSpeechTranslator(QMainWindow):
             # Если это текущий выбранный голос, запоминаем индекс
             if voice_id == current_voice_id:
                 current_index = i
+                print(f"🔊 DEBUG: Найден текущий голос на индексе {i}: {display_text[:50]}")
         
         # Проверяем количество элементов в комбобоксе
         combo_count = self.voice_combo.count()
@@ -2467,9 +2762,11 @@ class GoogleWebSpeechTranslator(QMainWindow):
         # Устанавливаем текущий выбор
         if current_voice_id and current_index < combo_count:
             self.voice_combo.setCurrentIndex(current_index)
+            print(f"🔊 DEBUG: Установлен текущий голос на индекс {current_index}")
         elif combo_count > 0:
             # Если текущий голос не найден, выбираем первый
             self.voice_combo.setCurrentIndex(0)
+            print(f"🔊 DEBUG: Текущий голос не найден, выбран первый голос")
         
         print(f"🔊 DEBUG: Комбобокс заполнен. Всего элементов: {self.voice_combo.count()}")
         self.message_queue.put(('info', f"✅ Загружено {combo_count} голосов"))
@@ -2478,6 +2775,63 @@ class GoogleWebSpeechTranslator(QMainWindow):
         self._voice_combo_loading = False
         
         # НЕ открываем popup автоматически - пользователь сам откроет его при необходимости
+
+    def _create_google_cloud_settings_group(self):
+        """Создает группу настроек для Google Cloud TTS"""
+        group = QGroupBox("Google Cloud TTS - API Настройки")
+        layout = QVBoxLayout(group)
+        layout.setSpacing(8)
+        layout.setContentsMargins(12, 15, 12, 12)
+        
+        # API ключ
+        api_label = QLabel("API Ключ:")
+        api_label.setStyleSheet("font-weight: bold; margin-bottom: 5px;")
+        layout.addWidget(api_label)
+        
+        self.google_api_key_input = QLineEdit()
+        self.google_api_key_input.setPlaceholderText("Введите API ключ Google Cloud")
+        self.google_api_key_input.setText(self.config.get('google_cloud_api_key', ''))
+        self.google_api_key_input.setEchoMode(QLineEdit.Password)
+        layout.addWidget(self.google_api_key_input)
+        
+        # Project ID
+        project_label = QLabel("Project ID (опционально):")
+        project_label.setStyleSheet("font-weight: bold; margin-top: 10px; margin-bottom: 5px;")
+        layout.addWidget(project_label)
+        
+        self.google_project_input = QLineEdit()
+        self.google_project_input.setPlaceholderText("Введите Project ID")
+        self.google_project_input.setText(self.config.get('google_cloud_project_id', ''))
+        layout.addWidget(self.google_project_input)
+        
+        # Voice name
+        voice_label = QLabel("Имя голоса:")
+        voice_label.setStyleSheet("font-weight: bold; margin-top: 10px; margin-bottom: 5px;")
+        layout.addWidget(voice_label)
+        
+        self.google_voice_input = QLineEdit()
+        self.google_voice_input.setPlaceholderText("ru-RU-Standard-A")
+        self.google_voice_input.setText(self.config.get('google_cloud_voice_name', 'ru-RU-Standard-A'))
+        layout.addWidget(self.google_voice_input)
+        
+        info = QLabel("<a href='https://cloud.google.com/text-to-speech' style='color: #6A1B9A;'>Документация Google Cloud TTS</a>")
+        info.setOpenExternalLinks(True)
+        info.setStyleSheet("color: #888888; font-size: 10px; font-style: italic; margin-top: 10px;")
+        layout.addWidget(info)
+        
+        return group
+    
+    def _update_provider_settings_visibility(self):
+        """Обновляет видимость групп настроек в зависимости от выбранного провайдера"""
+        if not hasattr(self, 'provider_settings_groups'):
+            return
+        
+        current_provider = self.config.get('tts_provider', 'elevenlabs')
+        
+        for provider_name, groups in self.provider_settings_groups.items():
+            visible = (provider_name == current_provider)
+            for group in groups:
+                group.setVisible(visible)
 
     def mousePressEvent(self, event):
         """Перетаскивание окна"""

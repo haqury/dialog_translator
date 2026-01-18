@@ -5,6 +5,7 @@ google_key.json
 *key*.json
 *.key
 *.pem
+promt.txt
 
 # Python
 __pycache__/
