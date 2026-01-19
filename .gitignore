@@ -9,6 +9,11 @@ promt.txt
 .env
 .env.local
 
+# Внутренние заметки и ревью
+CODE_REVIEW.md
+NOTES.md
+TODO.md
+
 # Python
 __pycache__/
 *.py[cod]
