@@ -1,0 +1,72 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # Триггер на теги типа v1.0.0
+
+jobs:
+  build:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+    
+    - name: Build EXE
+      run: |
+        python build_exe.py
+    
+    - name: Create ZIP archive
+      run: |
+        Compress-Archive -Path dist\TransGoogleTest\* -DestinationPath TransGoogleTest-${{ github.ref_name }}-win64.zip
+      shell: powershell
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: TransGoogleTest-${{ github.ref_name }}-win64.zip
+        body: |
+          ## 🎉 TransGoogleTest ${{ github.ref_name }}
+          
+          ### 📦 Установка
+          
+          1. Скачайте `TransGoogleTest-${{ github.ref_name }}-win64.zip`
+          2. Распакуйте архив
+          3. Запустите `TransGoogleTest.exe`
+          
+          ### ✨ Возможности
+          
+          - 🎤 Распознавание речи через Google Web Speech API
+          - 🌐 Автоматический перевод через Google Translate
+          - 🔊 Озвучивание переводов через ElevenLabs TTS
+          - 🎯 Поддержка 5 языков: RU, EN, ES, FR, DE
+          
+          ### 📋 Требования
+          
+          - Windows 7/8/10/11 (64-bit)
+          - Микрофон для распознавания речи
+          - Интернет соединение
+          
+          ### 🔑 Настройка
+          
+          1. При первом запуске создастся `config.json`
+          2. Добавьте API ключ ElevenLabs для озвучивания
+          3. Готово!
+          
+          ---
+          
+          **Полная документация**: [README.md](https://github.com/${{ github.repository }})
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

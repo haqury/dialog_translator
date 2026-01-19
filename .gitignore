@@ -57,3 +57,11 @@ audio_cache/
 # Временные файлы
 *.tmp
 *.log
+
+# PyInstaller сборка
+build/
+dist/
+*.spec.bak
+
+# Releases - только готовые релизы
+releases/*.zip
